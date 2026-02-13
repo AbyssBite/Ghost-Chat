@@ -1,10 +1,14 @@
 # Python-generated files
 __pycache__/
 *.py[oc]
+.python-version
 build/
 dist/
 wheels/
 *.egg-info
+uv.lock
 
 # Virtual environments
 .venv
+
+*.db
