@@ -12,3 +12,4 @@ uv.lock
 .venv
 
 *.db
+.agents/

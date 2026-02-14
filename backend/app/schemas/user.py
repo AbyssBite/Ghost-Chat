@@ -40,7 +40,7 @@ class UserSignup(BaseModel):
         return self
 
 
-class UserLogin(BaseModel):
+class UserSignin(BaseModel):
     username: NormalizedUsername
     password: SecretStr
 
