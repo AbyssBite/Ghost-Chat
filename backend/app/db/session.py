@@ -13,9 +13,13 @@ if DATABASE_URL is None:
 
 engine = create_async_engine(
     DATABASE_URL,
-    echo=os.getenv("DB_ECHO", "false").lower() == "true",
+    echo=False,
     pool_pre_ping=True,
-    pool_recycle=3600,
+    pool_recycle=300,
+    pool_size=8,
+    max_overflow=12,
+    connect_args={"connect_timeout": 10},
+    pool_timeout=25,
 )
 
 AsyncSessionLocal = async_sessionmaker(

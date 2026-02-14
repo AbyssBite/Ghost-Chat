@@ -1,14 +1,15 @@
 from ..db.base import Base
 
-from sqlalchemy import Integer, String
+from sqlalchemy import String
 from sqlalchemy.orm import Mapped, mapped_column
 from uuid import uuid4
+from sqlalchemy.dialects.postgresql import UUID
 
-class UserModel(Base):
+class User(Base):
     __tablename__ = "users"
 
-    user_id: Mapped[int] = mapped_column(
-        Integer, primary_key=True, nullable=False, autoincrement=True
+    user_id: Mapped[UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid4, nullable=False
     )
     session_id: Mapped[str] = mapped_column(
         String(36),

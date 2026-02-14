@@ -8,6 +8,7 @@ from pydantic import (
     StringConstraints,
 )
 from typing import Annotated
+from app.models.user import User
 
 
 def normalize_username(v: str) -> str:
@@ -22,16 +23,24 @@ NormalizedUsername = Annotated[
 
 
 class PublicUser(BaseModel):
-    user_id: int
+    user_id: str
     username: str
 
     model_config = ConfigDict(from_attributes=True)
 
+    @classmethod
+    def from_orm(cls, obj: User):
+        return cls(
+            user_id=str(obj.user_id),
+            username=obj.display_username,
+        )
+
 
 class UserSignup(BaseModel):
-    username: NormalizedUsername
+    display_username: str = Field(..., min_length=4, max_length=50)
     password: SecretStr = Field(..., min_length=8, max_length=255)
     repeat_password: SecretStr = Field(..., min_length=8, max_length=255)
+    username: NormalizedUsername = Field(..., alias="display_username")
 
     @model_validator(mode="after")
     def check_passwords_match(self) -> "UserSignup":
@@ -70,6 +79,13 @@ class UserUpdate(BaseModel):
         if self.new_username is None and self.new_password is None:
             raise ValueError("At least one field must be provided for update")
         return self
+
+
+class UserOut(BaseModel):
+    id: int
+    is_active: bool = True
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class UserDelete(BaseModel):
