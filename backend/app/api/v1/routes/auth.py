@@ -22,7 +22,6 @@ from app.schemas.user import (
     UserSignup,
     PublicUser,
     UserUpdate,
-    UserOut,
     UserRead,
     normalize_username,
 )
