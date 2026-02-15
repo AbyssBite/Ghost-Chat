@@ -4,11 +4,11 @@ from contextlib import asynccontextmanager
 from app.db.base import Base
 from app.db.session import engine
 
-from app.api.v1.routes import auth
+from app.api.v1.routes import auth, session
 
 root = "/api/v1"
 users = "/users"
-
+sessions = "/sessions"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -21,6 +21,10 @@ async def lifespan(app: FastAPI):
         raise
     yield
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(
+    lifespan=lifespan,
+    swagger_ui_parameters={"persistAuthorization": True},
+)
 
 app.include_router(auth.router, prefix=f"{root}{users}", tags=["User"])
+app.include_router(session.router, prefix=f"{root}{users}{sessions}", tags=["Sessions"])

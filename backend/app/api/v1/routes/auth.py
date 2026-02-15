@@ -1,10 +1,10 @@
+import re
 from uuid import UUID
 from typing import Annotated
 from datetime import datetime, timedelta, timezone
 
-
-from fastapi import APIRouter, Depends, HTTPException, status, Form
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, status, Form, Request
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 
@@ -32,6 +32,63 @@ from app.schemas.token import Token
 CurrentAuth = tuple[User, Session]
 
 router = APIRouter()
+
+
+def _client_ip(request: Request) -> str | None:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        client = forwarded.split(",")[0].strip()
+        if client:
+            return client
+    if request.client is not None:
+        return request.client.host
+    return request.headers.get("x-real-ip")
+
+
+def _device_info(request: Request) -> str | None:
+    ua = request.headers.get("user-agent")
+    if not ua or not ua.strip():
+        return None
+    ua = ua.strip()
+    parts: list[str] = []
+    browser_name = None
+    browser_ver = None
+    if "Chrome" in ua and "Edg" not in ua:
+        m = re.search(r"Chrome/(\d+(?:\.\d+)*)", ua, re.I)
+        if m:
+            browser_name, browser_ver = "Chrome", m.group(1).split(".")[0]
+    elif "Firefox" in ua:
+        m = re.search(r"Firefox/(\d+(?:\.\d+)*)", ua, re.I)
+        if m:
+            browser_name, browser_ver = "Firefox", m.group(1).split(".")[0]
+    elif "Safari" in ua and "Chrome" not in ua:
+        m = re.search(r"Version/(\d+(?:\.\d+)*)", ua, re.I)
+        browser_name = "Safari"
+        browser_ver = m.group(1).split(".")[0] if m else None
+    elif "Edg" in ua:
+        m = re.search(r"Edg/(\d+(?:\.\d+)*)", ua, re.I)
+        if m:
+            browser_name, browser_ver = "Edge", m.group(1).split(".")[0]
+    if browser_name:
+        parts.append(f"{browser_name} {browser_ver}" if browser_ver else browser_name)
+    os_name = None
+    if "Android" in ua:
+        m = re.search(r"Android (\d+(?:\.\d+)*)?", ua, re.I)
+        os_name = f"Android {m.group(1)}" if m and m.group(1) else "Android"
+    elif "iPhone" in ua or "iPad" in ua:
+        os_name = "iPhone" if "iPhone" in ua else "iPad"
+    elif "Windows" in ua:
+        os_name = "Windows"
+    elif "Mac OS" in ua or "Macintosh" in ua:
+        os_name = "macOS"
+    elif "Linux" in ua:
+        os_name = "Linux"
+    if os_name:
+        parts.append(os_name)
+    if "Mobile" in ua:
+        parts.append("Mobile")
+    summary = ", ".join(parts) if parts else ua[:80] + ("..." if len(ua) > 80 else "")
+    return summary
 
 
 @router.post("/signup", response_model=PublicUser, status_code=status.HTTP_201_CREATED)
@@ -82,7 +139,9 @@ async def signup(
 
 @router.post("/signin", response_model=Token, status_code=status.HTTP_200_OK)
 async def signin(
-    user: Annotated[UserSignin, Form()], db: AsyncSession = Depends(get_db)
+    request: Request,
+    user: Annotated[UserSignin, Form()],
+    db: AsyncSession = Depends(get_db),
 ):
     statement = select(User).where((User.normalized_username == user.username))
     result = await db.execute(statement=statement)
@@ -103,8 +162,8 @@ async def signin(
         expires_at=datetime.now(timezone.utc)
         + timedelta(days=settings.session_expire_days),
         is_active=True,
-        device_info=None,
-        ip_address=None,
+        device_info=_device_info(request),
+        ip_address=_client_ip(request),
     )
 
     db.add(new_session)
@@ -119,7 +178,7 @@ async def signin(
             detail="Failed to create session, please try again",
         ) from e
 
-    access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
+    access_token_expires = timedelta(days=settings.session_expire_days)
     access_token = create_access_token(
         data={"sub": str(exists.user_id), "sid": str(new_session.id)},
         expires_delta=access_token_expires,
@@ -264,6 +323,10 @@ async def logout(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     _, current_session = auth
-    current_session.is_active = False
+    await db.execute(
+        update(Session)
+        .where(Session.id == current_session.id)
+        .values(is_active=False)
+    )
     await db.commit()
     return None
