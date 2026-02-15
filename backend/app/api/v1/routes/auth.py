@@ -1,6 +1,7 @@
-from uuid import uuid4
+from uuid import UUID
 from typing import Annotated
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
+
 
 from fastapi import APIRouter, Depends, HTTPException, status, Form
 from sqlalchemy import select
@@ -17,17 +18,18 @@ from app.core.security import (
 )
 from app.core.config import settings
 from app.models.user import User
+from app.models.session import Session
 from app.schemas.user import (
     UserSignin,
     UserSignup,
     PublicUser,
     UserUpdate,
     UserRead,
-    UserOut,
     normalize_username,
 )
 from app.schemas.token import Token
 
+CurrentAuth = tuple[User, Session]
 
 router = APIRouter()
 
@@ -62,7 +64,6 @@ async def signup(
         normalized_username=user_in.normalized_username,
         display_username=user_in.display_username,
         password_hash=hashed_pwd,
-        session_id=str(uuid4()),
     )
 
     db.add(new_user)
@@ -77,7 +78,7 @@ async def signup(
             detail="Failed to create user, please try again",
         ) from e
 
-    return PublicUser.from_orm(new_user)
+    return PublicUser.model_validate(new_user)
 
 @router.post("/signin", response_model=Token, status_code=status.HTTP_200_OK)
 async def signin(
@@ -96,9 +97,31 @@ async def signin(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    new_session = Session(
+        user_id=exists.user_id,
+        created_at=datetime.now(timezone.utc),
+        expires_at=datetime.now(timezone.utc)
+        + timedelta(days=settings.session_expire_days),
+        is_active=True,
+        device_info=None,
+        ip_address=None,
+    )
+
+    db.add(new_session)
+
+    try:
+        await db.commit()
+        await db.refresh(new_session)
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create session, please try again",
+        ) from e
+
     access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
     access_token = create_access_token(
-        data={"sub": str(exists.user_id)},
+        data={"sub": str(exists.user_id), "sid": str(new_session.id)},
         expires_delta=access_token_expires,
     )
 
@@ -110,16 +133,31 @@ async def get_current_user(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     payload = verify_access_token(token)
-    if payload is None or not payload:
+    if payload is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # user_id = UUID(payload)
+    if not payload.get("sub") or not payload.get("sid"):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
-    user = await db.get(User, payload)
+    try:
+        user_id = UUID(payload.get("sub"))
+        session_id = UUID(payload.get("sid"))
+    except (ValueError, TypeError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    user = await db.get(User, user_id)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -127,24 +165,49 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # return UserRead(
-    #     user_id=str(user.user_id),
-    #     display_username=user.display_username,
-    # )
-    return user
+    session = await db.get(Session, session_id)
+    if not session or not session.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired session",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    now_utc = datetime.now(timezone.utc)
+    expires_at = session.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at < now_utc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired session",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    if session.user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return (user, session)
 
 
 @router.get("/me", response_model=UserRead)
-async def me_endpoint(current_user: Annotated[User, Depends(get_current_user)]):
+async def me_endpoint(
+    auth: Annotated[CurrentAuth, Depends(get_current_user)],
+):
+    current_user, _ = auth
     return UserRead.model_validate(current_user)
 
 
 @router.put("/me", response_model=UserRead)
 async def update_current_user(
     update_data: Annotated[UserUpdate, Form()],
-    current_user: Annotated[User, Depends(get_current_user)],
+    auth: Annotated[CurrentAuth, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
+    current_user, _ = auth
     if update_data.new_username is not None:
         normalized_new = normalize_username(update_data.new_username)
 
@@ -159,15 +222,15 @@ async def update_current_user(
                     detail="Username already taken",
                 )
 
-            current_user.display_username = (
-                update_data.new_username
-            )  # preserve user case
-            current_user.normalized_username = (
-                normalized_new  # lowercase for uniqueness
-            )
+            current_user.display_username = update_data.new_username
+            current_user.normalized_username = normalized_new
 
     if update_data.new_password is not None:
-        assert update_data.current_password is not None
+        if update_data.current_password is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Current password is required to set a new password",
+            )
 
         if not verify_password(
             update_data.current_password.get_secret_value(),
@@ -197,7 +260,10 @@ async def update_current_user(
 
 @router.post("/logout", status_code=status.HTTP_200_OK)
 async def logout(
-    user: Annotated[UserOut, Depends(get_current_user)],
-    token: Annotated[str, Depends(oauth2_scheme)],
+    auth: Annotated[CurrentAuth, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    pass
+    _, current_session = auth
+    current_session.is_active = False
+    await db.commit()
+    return None

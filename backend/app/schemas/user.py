@@ -45,12 +45,15 @@ class PublicUser(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+    @model_validator(mode="before")
     @classmethod
-    def from_orm(cls, obj: User):
-        return cls(
-            user_id=str(obj.user_id),
-            username=obj.display_username,
-        )
+    def from_user_orm(cls, data: object) -> object:
+        if isinstance(data, User):
+            return {
+                "user_id": str(data.user_id),
+                "username": data.display_username,
+            }
+        return data
 
 
 # class UserSignup(BaseModel):
