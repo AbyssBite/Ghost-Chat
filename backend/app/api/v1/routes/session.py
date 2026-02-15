@@ -9,7 +9,8 @@ from sqlalchemy import select, and_
 from app.db.session import get_db
 from app.models.session import Session
 from app.schemas.session import SessionRead
-from app.api.v1.routes.auth import get_current_user, CurrentAuth
+from app.api.v1.routes.auth import CurrentAuth
+from app.core.user_settings import get_current_user
 
 router = APIRouter()
 

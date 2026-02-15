@@ -6,7 +6,7 @@ from fastapi.security import OAuth2PasswordBearer
 from app.core.config import settings
 
 pwd_context = PasswordHash.recommended()
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/v1/users/signin")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/sign-in")
 
 
 def hash_password(password: str) -> str:

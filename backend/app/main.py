@@ -1,13 +1,16 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from app.db.base import Base
 from app.db.session import engine
+from app.core.config import settings
 
-from app.api.v1.routes import auth, session
+from app.api.v1.routes import auth, session, user
 
 root = "/api/v1"
-users = "/users"
+ath = "/auth"
+usr = "/users"
 sessions = "/sessions"
 
 @asynccontextmanager
@@ -26,5 +29,16 @@ app = FastAPI(
     swagger_ui_parameters={"persistAuthorization": True},
 )
 
-app.include_router(auth.router, prefix=f"{root}{users}", tags=["User"])
-app.include_router(session.router, prefix=f"{root}{users}{sessions}", tags=["Sessions"])
+# CORS for frontend (e.g. Next.js on localhost:3000)
+origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins if origins else ["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(auth.router, prefix=f"{root}{ath}", tags=["Auth"])
+app.include_router(session.router, prefix=f"{root}{usr}{sessions}", tags=["Sessions"])
+app.include_router(user.router, prefix=f"{root}{usr}", tags=["User"])

@@ -1,15 +1,32 @@
-# Python-generated files
-__pycache__/
-*.py[oc]
-.python-version
-build/
-dist/
-wheels/
-*.egg-info
-uv.lock
+# v0 runtime files (should only exist in preview, not in git)
+__v0_runtime_loader.js
+__v0_devtools.tsx
+__v0_jsx-dev-runtime.ts
 
-# Virtual environments
-.venv
+# Common ignores
+.DS_Store
 
-*.db
-.agents/
+# Frontend (Next.js) – do not track; keep off GitHub (leading / = root only, so backend/app/ is not ignored)
+frontend/
+/app/
+/components/
+/lib/
+/hooks/
+/styles/
+/public/
+/next.config.mjs
+/next-env.d.ts
+/tailwind.config.ts
+/postcss.config.mjs
+/tsconfig.json
+/components.json
+/package.json
+/package-lock.json
+/pnpm-lock.yaml
+/yarn.lock
+/node_modules/
+/.next/
+.env*.local
+.env.local.example
+/FRONTEND_PROMPT.md
+/PUBLIC_IP.md
