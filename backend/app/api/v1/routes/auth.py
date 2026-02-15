@@ -23,6 +23,7 @@ from app.schemas.user import (
     PublicUser,
     UserUpdate,
     UserRead,
+    UserOut,
     normalize_username,
 )
 from app.schemas.token import Token
@@ -192,3 +193,11 @@ async def update_current_user(
         )
 
     return UserRead.model_validate(current_user)
+
+
+@router.post("/logout", status_code=status.HTTP_200_OK)
+async def logout(
+    user: Annotated[UserOut, Depends(get_current_user)],
+    token: Annotated[str, Depends(oauth2_scheme)],
+):
+    pass
