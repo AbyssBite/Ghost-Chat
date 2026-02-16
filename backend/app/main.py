@@ -6,7 +6,7 @@ from app.db.base import Base
 from app.db.session import engine
 from app.core.config import settings
 
-from app.api.v1.routes import auth, session, user
+from app.api.v1.routes import auth, session, user, setting, ws_chat
 
 root = "/api/v1"
 ath = "/auth"
@@ -33,7 +33,7 @@ app = FastAPI(
 origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins if origins else ["*"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -42,3 +42,5 @@ app.add_middleware(
 app.include_router(auth.router, prefix=f"{root}{ath}", tags=["Auth"])
 app.include_router(session.router, prefix=f"{root}{usr}{sessions}", tags=["Sessions"])
 app.include_router(user.router, prefix=f"{root}{usr}", tags=["User"])
+app.include_router(setting.router, prefix=f"{root}{usr}", tags=["Settings"])
+app.include_router(ws_chat.router, tags=["Websocket"])

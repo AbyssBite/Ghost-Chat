@@ -168,12 +168,11 @@ class UserRead(BaseModel):
         return v
 
 class UserOut(BaseModel):
-    id: int
+    user_id: UUID
     is_active: bool = True
 
     model_config = ConfigDict(from_attributes=True)
 
 
 class UserDelete(BaseModel):
-    username: NormalizedUsername
     password: SecretStr

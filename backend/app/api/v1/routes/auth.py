@@ -11,16 +11,17 @@ from app.core.security import (
     verify_password,
     create_access_token,
 )
-from app.core.config import settings
+from app.core.config import settings as sttg
 from app.core.user_settings import _client_ip, _device_info
 from app.models.user import User
 from app.models.session import Session
 from app.schemas.user import (
+    PublicUser,
     UserSignin,
     UserSignup,
-    PublicUser,
 )
 from app.schemas.token import Token
+from app.models.settings import UserSettings
 
 CurrentAuth = tuple[User, Session]
 
@@ -80,8 +81,8 @@ async def signin(
     user: Annotated[UserSignin, Form()],
     db: AsyncSession = Depends(get_db),
 ):
-    statement = select(User).where((User.normalized_username == user.username))
-    result = await db.execute(statement=statement)
+    statement = select(User).where(User.normalized_username == user.username)
+    result = await db.execute(statement)
     exists = result.scalar_one_or_none()
 
     if not exists or not verify_password(
@@ -93,32 +94,44 @@ async def signin(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    stmt_settings = select(UserSettings).where(UserSettings.user_id == exists.user_id)
+    res_settings = await db.execute(stmt_settings)
+    settings = res_settings.scalar_one_or_none()
+    max_sessions = settings.max_sessions if settings else 5
+
+    stmt_sessions = (
+        select(Session)
+        .where(
+            Session.user_id == exists.user_id,
+            Session.is_active.is_(True),
+        )
+        .order_by(Session.created_at.asc())
+    )
+    res_sessions = await db.execute(stmt_sessions)
+    active_sessions = res_sessions.scalars().all()
+
+    if len(active_sessions) >= max_sessions:
+        # Terminate oldest session
+        oldest_session = active_sessions[0]
+        oldest_session.is_active = False
+        await db.commit()
+
     new_session = Session(
         user_id=exists.user_id,
         created_at=datetime.now(timezone.utc),
         expires_at=datetime.now(timezone.utc)
-        + timedelta(days=settings.session_expire_days),
+        + timedelta(days=sttg.session_expire_days),
         is_active=True,
         device_info=_device_info(request),
         ip_address=_client_ip(request),
     )
-
     db.add(new_session)
+    await db.commit()
+    await db.refresh(new_session)
 
-    try:
-        await db.commit()
-        await db.refresh(new_session)
-    except Exception as e:
-        await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create session, please try again",
-        ) from e
-
-    access_token_expires = timedelta(days=settings.session_expire_days)
     access_token = create_access_token(
         data={"sub": str(exists.user_id), "sid": str(new_session.id)},
-        expires_delta=access_token_expires,
+        expires_delta=timedelta(days=sttg.session_expire_days),
     )
 
     return Token(access_token=access_token, token_type="bearer")

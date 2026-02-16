@@ -1,17 +1,40 @@
 import re
-
 from uuid import UUID
 from typing import Annotated
 from datetime import datetime, timezone
-
-from fastapi import Request, HTTPException, Depends, status
+from fastapi import Request, WebSocket, HTTPException, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
-
-
 from app.core.security import oauth2_scheme, verify_access_token
 from app.db.session import get_db
 from app.models.user import User
 from app.models.session import Session
+
+
+async def validate_session_logic(payload: dict, db: AsyncSession):
+    if not payload or not payload.get("sub") or not payload.get("sid"):
+        return None
+
+    try:
+        user_id = UUID(payload.get("sub"))
+        session_id = UUID(payload.get("sid"))
+    except ValueError, TypeError:
+        return None
+
+    user = await db.get(User, user_id)
+    session_record = await db.get(Session, session_id)
+
+    if not user or not session_record or not session_record.is_active:
+        return None
+
+    now_utc = datetime.now(timezone.utc)
+    expires_at = session_record.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+
+    if expires_at < now_utc or session_record.user_id != user_id:
+        return None
+
+    return (user, session_record)
 
 
 async def get_current_user(
@@ -26,57 +49,39 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    if not payload.get("sub") or not payload.get("sid"):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    try:
-        user_id = UUID(payload.get("sub"))
-        session_id = UUID(payload.get("sid"))
-    except ValueError, TypeError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    user = await db.get(User, user_id)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    session = await db.get(Session, session_id)
-    if not session or not session.is_active:
+    result = await validate_session_logic(payload, db)
+    if not result:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired session",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    now_utc = datetime.now(timezone.utc)
-    expires_at = session.expires_at
-    if expires_at.tzinfo is None:
-        expires_at = expires_at.replace(tzinfo=timezone.utc)
-    if expires_at < now_utc:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired session",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    return result
 
-    if session.user_id != user_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
 
-    return (user, session)
+async def get_current_user_ws(
+    websocket: WebSocket,
+    db: AsyncSession = Depends(get_db),
+):
+    auth_header = websocket.headers.get("authorization") or websocket.headers.get(
+        "Authorization"
+    )
+
+    if not auth_header or not auth_header.startswith("Bearer "):
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return None
+
+    token = auth_header.split(" ")[1]
+    payload = verify_access_token(token)
+    if payload is None:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return None
+
+    result = await validate_session_logic(payload, db)
+    if not result:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return None
+    return result
 
 
 def _client_ip(request: Request) -> str | None:

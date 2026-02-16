@@ -6,19 +6,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 
 from app.db.session import get_db
-from app.core.security import (
-    hash_password,
-    verify_password,
-)
 from app.core.user_settings import get_current_user
 from app.models.user import User
-from app.schemas.user import (
-    UserUpdate,
-    UserRead,
-    normalize_username,
-)
+from app.schemas.user import UserRead, UserUpdate, normalize_username
 from app.api.v1.routes.auth import CurrentAuth
 from app.models.session import Session
+from app.core.security import hash_password, verify_password
 
 
 router = APIRouter()
