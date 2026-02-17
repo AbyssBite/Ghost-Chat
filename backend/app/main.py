@@ -6,7 +6,7 @@ from app.db.base import Base
 from app.db.session import engine
 from app.core.config import settings
 
-from app.api.v1.routes import auth, session, user, setting, ws_chat
+from app.api.v1.routes import auth, session, user, setting, ws_chat, chat
 
 root = "/api/v1"
 ath = "/auth"
@@ -44,3 +44,4 @@ app.include_router(session.router, prefix=f"{root}{usr}{sessions}", tags=["Sessi
 app.include_router(user.router, prefix=f"{root}{usr}", tags=["User"])
 app.include_router(setting.router, prefix=f"{root}{usr}", tags=["Settings"])
 app.include_router(ws_chat.router, tags=["Websocket"])
+app.include_router(chat.router, prefix=f"{root}{usr}", tags=["Chats"])

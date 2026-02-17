@@ -34,7 +34,8 @@ async def validate_session_logic(payload: dict, db: AsyncSession):
     if expires_at < now_utc or session_record.user_id != user_id:
         return None
 
-    return (user, session_record)
+    # return (user, session_record)
+    return user
 
 
 async def get_current_user(

@@ -19,9 +19,8 @@ router = APIRouter()
 
 @router.get("/me", response_model=UserRead)
 async def me_endpoint(
-    auth: Annotated[CurrentAuth, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(get_current_user)],
 ):
-    current_user, _ = auth
     return UserRead.model_validate(current_user)
 
 

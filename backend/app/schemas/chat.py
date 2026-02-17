@@ -1,4 +1,5 @@
-from pydantic import BaseModel
+import uuid
+from pydantic import BaseModel, ConfigDict
 from enum import Enum
 from datetime import datetime
 from typing import List
@@ -32,6 +33,14 @@ class ChatMember(BaseModel):
     username: str
     joined_at: datetime
     role: ChatMembersRole
+
+
+class ChatOut(BaseModel):
+    chat_id: uuid.UUID
+    type: ChatType
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class Message(BaseModel):
